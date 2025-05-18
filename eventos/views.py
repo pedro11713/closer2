@@ -1,9 +1,10 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import Evento
 from django.contrib.auth.models import User
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
 
 
 @api_view(['GET'])
@@ -26,6 +27,7 @@ def signup(request):
 
 @api_view(['POST'])
 def login_view(request):
+    print("Dados RECEBIDOSSSSS:", request.data)  # <- ADICIONE ISTO
     username = request.data.get('username')
     password = request.data.get('password')
     user = authenticate(request, username=username, password=password)
@@ -34,3 +36,15 @@ def login_view(request):
         return Response({'message': 'Logged in successfully'})
     else:
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(['GET'])
+def logout_view(request):
+    logout(request)
+    return Response({'message': 'Logged out successfully'})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_view(request):
+    return Response({'username': request.user.username})
