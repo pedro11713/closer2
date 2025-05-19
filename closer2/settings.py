@@ -35,6 +35,13 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
+
+
 ROOT_URLCONF = 'closer2.urls'
 
 TEMPLATES = [
@@ -92,17 +99,21 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Django REST framework config
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
-    ],
-}
 
 # CORS
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = True  # Se quiser permitir tudo
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 # ou, para controle mais restrito:
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+# Sessões: cookies devem ser enviados no mesmo domínio entre backend e frontend
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = False  # True em produção com HTTPS
+
+# CSRF: precisa estar consistente para login via frontend
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = False  # True em produção com HTTPS

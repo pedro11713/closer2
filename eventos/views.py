@@ -38,7 +38,7 @@ def login_view(request):
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
-@api_view(['GET'])
+@api_view(['POST'])
 def logout_view(request):
     logout(request)
     return Response({'message': 'Logged out successfully'})
@@ -47,4 +47,20 @@ def logout_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_view(request):
+    print(request.user.username)
     return Response({'username': request.user.username})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def criar_evento(request):
+    data = request.data.copy()  # Cria uma cópia mutável
+    if not data.get('imagem_url'):
+        data['imagem_url'] = '/logo512.png'  # Caminho padrão temporário
+
+    serializer = EventoSerializer(data=data)
+    if serializer.is_valid():
+        serializer.save(usuario=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
