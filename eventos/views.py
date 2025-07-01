@@ -4,13 +4,14 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Evento
+from .models import Evento, Participacao, MensagemChat
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from .serializers import EventoSerializer
+
+from .serializers import EventoSerializer, ParticipacaoSerializer, MensagemChatSerializer
 
 
 @api_view(['GET'])
@@ -92,8 +93,6 @@ def meus_eventos(request):
     return Response(serializer.data)
 
 
-# eventos/views.py (ADICIONE ESTA NOVA VIEW)
-
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def deletar_evento(request, pk):
@@ -113,8 +112,6 @@ def deletar_evento(request, pk):
     return Response({'message': 'Evento apagado com sucesso!'},
                     status=status.HTTP_204_NO_CONTENT)  # 204 significa sucesso, sem conteúdo na resposta
 
-
-# Adicione esta função ao seu arquivo eventos/views.py
 
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
@@ -137,9 +134,6 @@ def editar_evento(request, pk):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-# Adicione esta função ao seu arquivo eventos/views.py
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def detalhe_evento(request, pk):
@@ -156,4 +150,137 @@ def detalhe_evento(request, pk):
 
     # Se encontrar, serializa os dados e os retorna.
     serializer = EventoSerializer(evento, context={'request': request})
+    return Response(serializer.data)
+
+# --- NOVOOOOOOO
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def solicitar_participacao(request, pk):
+    """
+    Cria uma solicitação de participação (um 'like') para um evento.
+    'pk' é o ID do evento.
+    """
+    try:
+        evento = Evento.objects.get(pk=pk)
+    except Evento.DoesNotExist:
+        return Response({'error': 'Evento não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Impede o dono do evento de solicitar participação no próprio evento
+    if evento.usuario == request.user:
+        return Response({'error': 'Você não pode solicitar participação no seu próprio evento.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # O unique_together no modelo já impede duplicatas, mas podemos verificar aqui também.
+    # 'get_or_create' tenta buscar um objeto, se não encontrar, ele cria.
+    participacao, created = Participacao.objects.get_or_create(
+        evento=evento,
+        participante=request.user,
+        # Defaults para o caso de 'create'
+        defaults={'status': Participacao.Status.PENDENTE}
+    )
+
+    if not created:
+        # Se a participação já existia (não foi criada agora)
+        return Response({'message': 'Você já solicitou participação neste evento.'}, status=status.HTTP_200_OK)
+
+    # Se foi criada agora
+    return Response({'message': 'Solicitação de participação enviada com sucesso!'}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def responder_solicitacao(request, pk):
+    """
+    Responde a uma solicitação de participação (aceita ou rejeita).
+    'pk' é o ID da Participacao.
+    """
+    try:
+        # Busca a participação pelo ID e garante que o evento associado pertence ao usuário logado
+        participacao = Participacao.objects.get(pk=pk, evento__usuario=request.user)
+    except Participacao.DoesNotExist:
+        return Response({'error': 'Solicitação não encontrada ou você não tem permissão.'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    nova_decisao = request.data.get('decisao')  # Espera receber 'aceitar' ou 'rejeitar'
+
+    if nova_decisao == 'aceitar':
+        participacao.status = Participacao.Status.ACEITO
+    elif nova_decisao == 'rejeitar':
+        participacao.status = Participacao.Status.REJEITADO
+    else:
+        return Response({'error': 'Decisão inválida. Use "aceitar" ou "rejeitar".'}, status=status.HTTP_400_BAD_REQUEST)
+
+    participacao.save()
+    serializer = ParticipacaoSerializer(participacao)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def listar_meus_chats(request):
+    """
+    Lista APENAS os eventos criados pelo usuário logado.
+    Isto alimentará a barra lateral de chats do criador.
+    """
+    eventos_do_criador = Evento.objects.filter(usuario=request.user).order_by('-data_hora')
+    serializer = EventoSerializer(eventos_do_criador, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def listar_mensagens(request, evento_id):
+    """
+    Lista as mensagens de um chat. Garante que o usuário logado é o criador do evento.
+    """
+    try:
+        evento = Evento.objects.get(pk=evento_id, usuario=request.user)
+    except Evento.DoesNotExist:
+        return Response({'error': 'Você não tem acesso a este chat.'}, status=status.HTTP_403_FORBIDDEN)
+
+    mensagens = evento.mensagens.all()
+    serializer = MensagemChatSerializer(mensagens, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def enviar_mensagem(request, evento_id):
+    """
+    Envia uma mensagem para um chat de um evento que o usuário criou.
+    """
+    try:
+        evento = Evento.objects.get(pk=evento_id, usuario=request.user)
+    except Evento.DoesNotExist:
+        return Response({'error': 'Você não pode enviar mensagens neste chat.'}, status=status.HTTP_403_FORBIDDEN)
+
+    conteudo = request.data.get('conteudo')
+    if not conteudo or not conteudo.strip():
+        return Response({'error': 'A mensagem não pode estar vazia.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    mensagem = MensagemChat.objects.create(
+        evento=evento,
+        autor=request.user,
+        conteudo=conteudo
+    )
+
+    serializer = MensagemChatSerializer(mensagem, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def listar_solicitacoes_por_evento(request, evento_id):
+    """
+    Lista as solicitações PENDENTES para um único evento específico.
+    Garante que apenas o criador do evento possa ver as solicitações.
+    """
+    try:
+        # Garante que o evento existe e pertence ao usuário logado
+        evento = Evento.objects.get(pk=evento_id, usuario=request.user)
+    except Evento.DoesNotExist:
+        return Response({'error': 'Evento não encontrado ou você não tem permissão.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Filtra as participações pendentes para este evento específico
+    solicitacoes = evento.participacoes.filter(status=Participacao.Status.PENDENTE)
+    serializer = ParticipacaoSerializer(solicitacoes, many=True, context={'request': request})
     return Response(serializer.data)
