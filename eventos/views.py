@@ -10,7 +10,6 @@ from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-
 from .serializers import EventoSerializer, ParticipacaoSerializer, MensagemChatSerializer
 
 
@@ -82,6 +81,7 @@ def create_event(request):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meus_eventos(request):
@@ -134,6 +134,7 @@ def editar_evento(request, pk):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def detalhe_evento(request, pk):
@@ -152,6 +153,7 @@ def detalhe_evento(request, pk):
     serializer = EventoSerializer(evento, context={'request': request})
     return Response(serializer.data)
 
+
 # --- NOVOOOOOOO
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -167,7 +169,8 @@ def solicitar_participacao(request, pk):
 
     # Impede o dono do evento de solicitar participação no próprio evento
     if evento.usuario == request.user:
-        return Response({'error': 'Você não pode solicitar participação no seu próprio evento.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Você não pode solicitar participação no seu próprio evento.'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     # O unique_together no modelo já impede duplicatas, mas podemos verificar aqui também.
     # 'get_or_create' tenta buscar um objeto, se não encontrar, ele cria.
@@ -226,16 +229,29 @@ def listar_meus_chats(request):
     return Response(serializer.data)
 
 
+# eventos/views.py (SUBSTITUA ESTAS DUAS VIEWS)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def listar_mensagens(request, evento_id):
     """
-    Lista as mensagens de um chat. Garante que o usuário logado é o criador do evento.
+    Lista as mensagens de um chat.
+    Permite o acesso se o usuário for o CRIADOR ou um PARTICIPANTE ACEITO.
     """
     try:
-        evento = Evento.objects.get(pk=evento_id, usuario=request.user)
+        evento = Evento.objects.get(pk=evento_id)
+        # --- CORREÇÃO DA LÓGICA DE PERMISSÃO ---
+        participacao_aceita = evento.participacoes.filter(
+            participante=request.user,
+            status=Participacao.Status.ACEITO
+        ).exists()
+
+        if evento.usuario != request.user and not participacao_aceita:
+            return Response({'error': 'Você não tem acesso a este chat.'}, status=status.HTTP_403_FORBIDDEN)
+        # ------------------------------------
+
     except Evento.DoesNotExist:
-        return Response({'error': 'Você não tem acesso a este chat.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'Evento não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     mensagens = evento.mensagens.all()
     serializer = MensagemChatSerializer(mensagens, many=True, context={'request': request})
@@ -246,12 +262,23 @@ def listar_mensagens(request, evento_id):
 @permission_classes([IsAuthenticated])
 def enviar_mensagem(request, evento_id):
     """
-    Envia uma mensagem para um chat de um evento que o usuário criou.
+    Envia uma mensagem para um chat.
+    Permite o acesso se o usuário for o CRIADOR ou um PARTICIPANTE ACEITO.
     """
     try:
-        evento = Evento.objects.get(pk=evento_id, usuario=request.user)
+        evento = Evento.objects.get(pk=evento_id)
+        # --- CORREÇÃO DA LÓGICA DE PERMISSÃO ---
+        participacao_aceita = evento.participacoes.filter(
+            participante=request.user,
+            status=Participacao.Status.ACEITO
+        ).exists()
+
+        if evento.usuario != request.user and not participacao_aceita:
+            return Response({'error': 'Você não pode enviar mensagens neste chat.'}, status=status.HTTP_403_FORBIDDEN)
+        # ------------------------------------
+
     except Evento.DoesNotExist:
-        return Response({'error': 'Você não pode enviar mensagens neste chat.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'Evento não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     conteudo = request.data.get('conteudo')
     if not conteudo or not conteudo.strip():
@@ -284,3 +311,73 @@ def listar_solicitacoes_por_evento(request, evento_id):
     solicitacoes = evento.participacoes.filter(status=Participacao.Status.PENDENTE)
     serializer = ParticipacaoSerializer(solicitacoes, many=True, context={'request': request})
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def listar_chats_aceitos(request):
+    """
+    Lista os eventos onde o usuário é um participante ACEITO e também os que
+    estão PENDENTES de aprovação.
+    """
+    # Busca participações ACEITAS
+    participacoes_aceitas = Participacao.objects.filter(
+        participante=request.user,
+        status=Participacao.Status.ACEITO
+    ).select_related('evento')
+    eventos_aceitos = [p.evento for p in participacoes_aceitas]
+
+    # Busca participações PENDENTES
+    participacoes_pendentes = Participacao.objects.filter(
+        participante=request.user,
+        status=Participacao.Status.PENDENTE
+    ).select_related('evento')
+    eventos_pendentes = [p.evento for p in participacoes_pendentes]
+
+    # Serializa as duas listas
+    serializer_aceitos = EventoSerializer(eventos_aceitos, many=True, context={'request': request})
+    serializer_pendentes = EventoSerializer(eventos_pendentes, many=True, context={'request': request})
+
+    # Retorna um objeto com as duas listas
+    return Response({
+        'aceitos': serializer_aceitos.data,
+        'pendentes': serializer_pendentes.data
+    })
+
+
+@api_view(['POST'])  # Usamos POST para uma ação que modifica o estado
+@permission_classes([IsAuthenticated])
+def sair_do_evento(request, evento_id):
+    """
+    Permite que um participante aceito saia de um evento (apagando sua participação).
+    """
+    try:
+        # Busca a participação específica do usuário neste evento
+        participacao = Participacao.objects.get(
+            evento__id=evento_id,
+            participante=request.user
+        )
+        # Apaga o registro de participação
+        participacao.delete()
+        return Response({'message': 'Você saiu do evento com sucesso.'}, status=status.HTTP_200_OK)
+    except Participacao.DoesNotExist:
+        return Response({'error': 'Você não é participante deste evento.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def desistir_solicitacao(request, evento_id):
+    """
+    Permite que um usuário cancele (delete) sua própria solicitação PENDENTE.
+    """
+    try:
+        # Busca a participação PENDENTE do usuário neste evento
+        participacao = Participacao.objects.get(
+            evento__id=evento_id,
+            participante=request.user,
+            status=Participacao.Status.PENDENTE
+        )
+        participacao.delete()
+        return Response({'message': 'Sua solicitação foi cancelada com sucesso.'}, status=status.HTTP_200_OK)
+    except Participacao.DoesNotExist:
+        return Response({'error': 'Nenhuma solicitação pendente encontrada para este evento.'}, status=status.HTTP_404_NOT_FOUND)

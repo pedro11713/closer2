@@ -4,7 +4,9 @@ from django.conf import settings
 from django.conf.urls.static import static
 from eventos.views import (
     listar_eventos, login_view, signup, logout_view,
-    user_view, create_event, get_csrf_token, meus_eventos, deletar_evento, detalhe_evento,  editar_evento, solicitar_participacao, responder_solicitacao, listar_meus_chats, listar_mensagens, enviar_mensagem, listar_solicitacoes_por_evento
+    user_view, create_event, get_csrf_token, meus_eventos, deletar_evento, detalhe_evento, editar_evento,
+    solicitar_participacao, responder_solicitacao, listar_meus_chats, listar_mensagens,
+    enviar_mensagem, listar_solicitacoes_por_evento, listar_chats_aceitos, sair_do_evento, desistir_solicitacao
 )
 
 urlpatterns = [
@@ -26,6 +28,9 @@ urlpatterns = [
     path('api/chat/<int:evento_id>/mensagens/', listar_mensagens),
     path('api/chat/<int:evento_id>/enviar/', enviar_mensagem),
     path('api/evento/<int:evento_id>/solicitacoes/', listar_solicitacoes_por_evento),
+    path('api/chats-aceitos/', listar_chats_aceitos),
+    path('api/evento/<int:evento_id>/sair/', sair_do_evento),
+    path('api/evento/<int:evento_id>/desistir/', desistir_solicitacao),
 
 ]
 
